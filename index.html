@@ -1,0 +1,239 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Post Creator</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 600px;
+            width: 100%;
+        }
+        h1, h2 {
+            text-align: center;
+        }
+        input, button, textarea {
+            background-color: #111;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 10px;
+            margin: 10px 0;
+            width: 100%;
+            box-sizing: border-box;
+            font-family: 'Courier New', monospace;
+        }
+        button {
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #0f0;
+            color: #000;
+        }
+        .Code {
+            padding: 10px;
+            border-bottom: 1px solid #0f0;
+            cursor: pointer;
+        }
+        .Code:hover {
+            background-color: #222;
+        }
+        #loginPage, #mainPage, #postDetailPage {
+            display: none;
+        }
+        #loginPage.active, #mainPage.active, #postDetailPage.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Login/Register Page -->
+        <div id="loginPage" class="active">
+            <h1>Login or Register</h1>
+            <input type="text" id="username" placeholder="Username">
+            <input type="password" id="password" placeholder="Password">
+            <button onclick="login()">Login</button>
+            <button onclick="register()">Register</button>
+        </div>
+
+        <!-- Main Page: Create and List Posts -->
+        <div id="mainPage">
+            <h1>Posts</h1>
+            <button onclick="logout()">Logout</button>
+            <h2>Create New Post</h2>
+            <input type="text" id="postTitle" placeholder="Post Title">
+            <textarea id="postContent" placeholder="Post Content" rows="5"></textarea>
+            <button onclick="createPost()">Create Post</button>
+            <h2>Your Posts</h2>
+            <div id="postList"></div>
+        </div>
+
+        <!-- Post Detail Page -->
+        <div id="postDetailPage">
+            <h1 id="postDetailTitle"></h1>
+            <p id="postDetailContent"></p>
+            <button onclick="backToMain()">Back to Posts</button>
+        </div>
+    </div>
+
+    <script>
+        // Initialize localStorage if not set
+        if (!localStorage.getItem('users')) {
+            localStorage.setItem('users', JSON.stringify({}));
+        }
+        if (!localStorage.getItem('posts')) {
+            localStorage.setItem('posts', JSON.stringify([]));
+        }
+
+        let currentUser = null;
+
+        // Page switching
+        function showPage(pageId) {
+            document.querySelectorAll('#loginPage, #mainPage, #postDetailPage').forEach(page => {
+                page.classList.remove('active');
+            });
+            document.getElementById(pageId).classList.add('active');
+        }
+
+        // Register new user
+        function register() {
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            if (!username || !password) {
+                alert('Please enter both username and password');
+                return;
+            }
+            const users = JSON.parse(localStorage.getItem('users'));
+            if (users[username]) {
+                alert('Username already exists');
+                return;
+            }
+            users[username] = { password };
+            localStorage.setItem('users', JSON.stringify(users));
+            alert('Registration successful! Please log in.');
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+        }
+
+        // Login user
+        function login() {
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const users = JSON.parse(localStorage.getItem('users'));
+            if (users[username] && users[username].password === password) {
+                currentUser = username;
+                showPage('mainPage');
+                loadPosts();
+            } else {
+                alert('Invalid username or password');
+            }
+        }
+
+        // Logout user
+        function logout() {
+            currentUser = null;
+            document.getElementById('postTitle').value = '';
+            document.getElementById('postContent').value = '';
+            showPage('loginPage');
+        }
+
+        // Create a new Code
+        function createPost() {
+            const title = document.getElementById('postTitle').value.trim();
+            const content = document.getElementById('postContent').value.trim();
+            if (!title || !content) {
+                alert('Please enter both title and content');
+                return;
+            }
+            const posts = JSON.parse(localStorage.getItem('posts'));
+            posts.push({ title, content, author: currentUser });
+            localStorage.setItem('posts', JSON.stringify(posts));
+            document.getElementById('postTitle').value = '';
+            document.getElementById('postContent').value = '';
+            loadPosts();
+        }
+
+        // Load and display posts
+        function loadPosts() {
+            const posts = JSON.parse(localStorage.getItem('posts'));
+            const postList = document.getElementById('postList');
+            postList.innerHTML = '';
+            posts.forEach((Code, index) => {
+                if (Code.author === currentUser) {
+                    const postDiv = document.createElement('div');
+                    postDiv.className = 'Code';
+                    postDiv.textContent = Code.title;
+                    postDiv.onclick = () => showPostDetail(index);
+                    postList.appendChild(postDiv);
+                }
+            });
+        }
+
+        // Show Code details
+        function showPostDetail(index) {
+            const posts = JSON.parse(localStorage.getItem('posts'));
+            const Code = posts[index];
+            document.getElementById('postDetailTitle').textContent = Code.title;
+            document.getElementById('postDetailContent').textContent = Code.content;
+            showPage('postDetailPage');
+        }
+
+        // Back to main page
+        function backToMain() {
+            showPage('mainPage');
+            loadPosts();
+        }
+    </script>
+</body>
+</html>
